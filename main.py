@@ -25,8 +25,6 @@ def read_input():
     except KeyboardInterrupt:
         print("\nInput cancelled")
         sys.exit(1)
-    except EOFError:
-        pass
 
     if not lines:
         print("Error: no input provided")
@@ -69,9 +67,12 @@ def evaluate_tree(tree, variables=None):
             return tree.value[1:-1]
         elif tree.type == 'NUMBER':
             val = tree.value
-            if val.lower().startswith('0x'):
-                return int(val, 16)
-            return int(val)
+            try:
+                if val.lower().startswith('0x'):
+                    return int(val, 16)
+                return int(val)
+            except ValueError as e:
+                raise ValueError(f"Invalid number format: {val}")
         return tree.value
 
     elif isinstance(tree, Tree):
@@ -100,11 +101,17 @@ def evaluate_tree(tree, variables=None):
 
         elif tree.data == 'start':
             config = {}
+            errors = []
             for child in tree.children:
-                result = evaluate_tree(child, variables)
-                if result is not None:
-                    name, value = result
-                    config[name] = value
+                try:
+                    result = evaluate_tree(child, variables)
+                    if result is not None:
+                        name, value = result
+                        config[name] = value
+                except ValueError as e:
+                    errors.append(str(e))
+            for error in errors:
+                print(f"Error: {error}")
             return config
 
     return None
@@ -129,7 +136,12 @@ def main():
     try:
         parser = Lark(GRAMMAR, parser='lalr')
         tree = parser.parse(input_text)
+
         config = evaluate_tree(tree)
+        if not config:
+            print("Error: No valid configuration lines found")
+            sys.exit(1)
+
         output_lines = []
         for key, value in config.items():
             formatted_value = format_value(value)
@@ -143,7 +155,26 @@ def main():
         print(f"Success: Output saved to {output_file}")
 
     except Exception as e:
-        print(f"Error: {e}")
+        error_msg = str(e)
+        if "Unexpected token" in error_msg:
+            if "Expected" in error_msg:
+                # Извлекаем полезную информацию
+                lines = input_text.split('\n')
+                for i, line in enumerate(lines, 1):
+                    if ':=' in line or ':' in line:
+                        if line.strip().endswith((':=')) or line.strip().endswith(':'):
+                            print(f"Error: Missing value")
+                            sys.exit(1)
+                        elif '[' in line and ']' not in line:
+                            print(f"Error: Unclosed array")
+                            sys.exit(1)
+                        elif '${' in line and '}' not in line:
+                            print(f"Error: Unclosed variable reference")
+                            sys.exit(1)
+                print(f"Error: Syntax error")
+                sys.exit(1)
+
+        print(f"Error: {error_msg}")
         sys.exit(1)
 
 
